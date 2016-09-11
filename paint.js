@@ -6,7 +6,7 @@ function initialize() {
 		lines : {
 			separation : 25,
 			color : '#D0D0D0',
-			min : 10,
+			min : 15,
 			max : 200
 		},
 		width : cnv.width,
@@ -21,60 +21,68 @@ function initialize() {
 			min : 0.01,
 			delta : 8.0
 		},
+		buffer: 50
 	};
 
 	gridOptions.ws = new WebSocket("ws://cloudvm.mine.nu/ws");
+	
 	gridOptions.ws.onmessage = function (e) {
 		onMessage(e, gridOptions)
 	};
+	
 	gridOptions.ws.onopen = function (e) {
 		requestData({
-			'startX' : gridOptions.startX - 5,
-			'startY' : gridOptions.startY - 5,
-			'endX' : gridOptions.endX + 5,
-			'endY' : gridOptions.endY + 5
+			'startX' : gridOptions.startX - gridOptions.buffer,
+			'startY' : gridOptions.startY - gridOptions.buffer,
+			'endX' : gridOptions.endX + gridOptions.buffer,
+			'endY' : gridOptions.endY + gridOptions.buffer
 		}, gridOptions)
 	};
+	
 	//gridOptions.ws.onclose = function(e){console.log('Socket Closed')};
-	//gridOptions.ws.onmessage = function(e){console.log('recieved:\t' + e.data)};
-
 
 	// Register an event listener to call the resizeCanvas() function
 	// each time the window is resized.
 	window.addEventListener('resize', function () {
 		resizeCanvas(gridOptions)
 	}, false);
+	
 	window.addEventListener("keypress", function (e) {
 		onKeypress(e, gridOptions)
 	}, false);
+	
 	window.addEventListener("keydown", function (e) {
 		onKeydown(e, gridOptions)
 	}, false);
+	
 	window.addEventListener("click", function (e) {
 		onClick(e, gridOptions)
 	}, false);
+	
 	//window.addEventListener("click", function(e){onClick(e, gridOptions)}, false);
 	window.addEventListener("mousemove", function (e) {
-		gridOptions.mouseX = e.clientX;
-		gridOptions.mouseY = e.clientY;
+		onMouseMove(e, gridOptions);
 	}, false);
+	
 	window.addEventListener("mousewheel", function (e) {
 		MouseWheelHandler(e, gridOptions)
 	}, false);
+	
 	window.addEventListener("DOMMouseScroll", function (e) {
 		MouseWheelHandler(e, gridOptions)
 	}, false);
 
-	window.setInterval(function () {
+	/*window.setInterval(function () {
 		requestData({
-			'startX' : gridOptions.startX - 5,
-			'startY' : gridOptions.startY - 5,
-			'endX' : gridOptions.endX + 5,
-			'endY' : gridOptions.endY + 5
+			'startX' : gridOptions.startX - gridOptions.buffer,
+			'startY' : gridOptions.startY - gridOptions.buffer,
+			'endX' : gridOptions.endX + gridOptions.buffer,
+			'endY' : gridOptions.endY + gridOptions.buffer
 		}, gridOptions)
-	}, 5000);
+	}, 5000);*/
+	
 
-	// Draw canvas border for the first time.
+	// Draw canvas for the first time.
 	resizeCanvas(gridOptions);
 }
 
@@ -84,6 +92,9 @@ function zoom(amount, gridOptions) {
 		gridOptions.lines.separation = gridOptions.lines.max;
 	else if (gridOptions.lines.separation < gridOptions.lines.min)
 		gridOptions.lines.separation = gridOptions.lines.min;
+	
+	calcGrid(gridOptions);
+	gridOptions.buffer = Math.ceil(Math.max(gridOptions.numCellsX, gridOptions.numCellsY) / 2)
 	redraw(gridOptions);
 }
 
@@ -95,8 +106,27 @@ function MouseWheelHandler(e, gridOptions) {
 	zoom(delta, gridOptions)
 }
 
+function onMouseMove(e, gridOptions) {
+	gridOptions.mouseX = e.clientX;
+	gridOptions.mouseY = e.clientY;
+	
+	if(gridOptions.mouseX < 15) {
+		move({'x':-1}, gridOptions);
+	}
+	else if(gridOptions.mouseX > gridOptions.width-15) {
+		move({'x':1}, gridOptions);
+	}
+	
+	if(gridOptions.mouseY < 15) {
+		move({'y':-1}, gridOptions);
+	}
+	else if(gridOptions.mouseY > gridOptions.height-15) {
+		move({'y':1}, gridOptions);
+	}
+}
+
 function onKeypress(e, gridOptions) {
-	console.log('onKeypress')
+	//console.log('onKeypress')
 	if (e.keyCode == 43 || e.keyCode == 61) {
 		// + or =
 		zoom(1, gridOptions);
@@ -117,7 +147,7 @@ function onKeypress(e, gridOptions) {
 
 		if (cell != gridOptions.lastCell) {
 			gridOptions.lastCell = cell;
-			setCellColor(cell, '', gridOptions);
+			blendCellColor(cell, '', gridOptions);
 		}
 	} else if (e.keyCode == 120) {
 		// X
@@ -125,7 +155,7 @@ function onKeypress(e, gridOptions) {
 
 		if (cell != gridOptions.lastCell) {
 			gridOptions.lastCell = cell;
-			setCellColor(cell, '#000000', gridOptions);
+			blendCellColor(cell, '#000000', gridOptions);
 		}
 	} else if (e.keyCode == 99) {
 		// C
@@ -133,7 +163,7 @@ function onKeypress(e, gridOptions) {
 
 		if (cell != gridOptions.lastCell) {
 			gridOptions.lastCell = cell;
-			setCellColor(cell, '#FF0000', gridOptions);
+			blendCellColor(cell, '#FF0000', gridOptions);
 		}
 	} else if (e.keyCode == 118) {
 		// V
@@ -141,7 +171,7 @@ function onKeypress(e, gridOptions) {
 
 		if (cell != gridOptions.lastCell) {
 			gridOptions.lastCell = cell;
-			setCellColor(cell, '#00FF00', gridOptions);
+			blendCellColor(cell, '#00FF00', gridOptions);
 		}
 	} else if (e.keyCode == 98) {
 		// B
@@ -149,7 +179,7 @@ function onKeypress(e, gridOptions) {
 
 		if (cell != gridOptions.lastCell) {
 			gridOptions.lastCell = cell;
-			setCellColor(cell, '#0000FF', gridOptions);
+			blendCellColor(cell, '#0000FF', gridOptions);
 		}
 	} else if (e.keyCode == 113) {
 		//Q
@@ -175,23 +205,79 @@ function onKeypress(e, gridOptions) {
 
 }
 
+function move(amount, gridOptions) {
+	amount.x = amount.x || 0;
+	amount.y = amount.y || 0;
+	
+	gridOptions.startX += amount.x;
+	gridOptions.startY += amount.y;
+	
+	calcGrid(gridOptions);
+
+	if(amount.x < 0 && gridOptions.cells[gridOptions.startX - gridOptions.buffer] == undefined) {
+		requestData({
+				'startX' : gridOptions.startX - gridOptions.buffer,
+				'startY' : gridOptions.startY - gridOptions.buffer,
+				'endX' : gridOptions.startX,
+				'endY' : gridOptions.endY + gridOptions.buffer
+			}, gridOptions);
+	}
+	else if(amount.x > 0 && gridOptions.cells[gridOptions.endX + gridOptions.buffer] == undefined) {
+		requestData({
+				'startX' : gridOptions.endX, 
+				'startY' : gridOptions.startY - gridOptions.buffer,
+				'endX' : gridOptions.endX + gridOptions.buffer,
+				'endY' : gridOptions.endY + gridOptions.buffer
+			}, gridOptions);
+	}
+	
+	if(amount.y < 0 && (gridOptions.cells[gridOptions.startX] == undefined  || gridOptions.cells[gridOptions.startX][gridOptions.startY - gridOptions.buffer])) {
+		requestData({
+				'startX' : gridOptions.startX - gridOptions.buffer,
+				'startY' : gridOptions.startY - gridOptions.buffer,
+				'endX' : gridOptions.endX + gridOptions.buffer,
+				'endY' : gridOptions.startY
+			}, gridOptions);
+	}
+	else if(amount.y > 0 && (gridOptions.cells[gridOptions.startX] == undefined || gridOptions.cells[gridOptions.startX][gridOptions.endY + gridOptions.buffer])) {
+		requestData({
+				'startX' : gridOptions.startX - gridOptions.buffer, 
+				'startY' : gridOptions.endY,
+				'endX' : gridOptions.endX + gridOptions.buffer,
+				'endY' : gridOptions.endY + gridOptions.buffer
+			}, gridOptions);
+	}
+	redraw(gridOptions);
+}
+
 function onKeydown(e, gridOptions) {
 	if (e.keyCode == 37) {
 		//Left
-		gridOptions.startX -= 1;
-		redraw(gridOptions);
+		move({'x':-1}, gridOptions);
 	} else if (e.keyCode == 39) {
 		//Right
-		gridOptions.startX += 1;
-		redraw(gridOptions);
+		move({'x':1}, gridOptions);
 	} else if (e.keyCode == 38) {
 		//Up
-		gridOptions.startY -= 1;
-		redraw(gridOptions);
+		move({'y':-1}, gridOptions);
 	} else if (e.keyCode == 40) {
 		//Down
-		gridOptions.startY += 1;
-		redraw(gridOptions);
+		move({'y':1}, gridOptions);
+	} else if (e.keyCode == 27) {
+		//Esc
+		alert('Controls:\n \
+		Left Click: Toggle One Color\n \
+		Arrow Keys: Move\n \
+		Space:      Toggle Colors\n \
+		Z:          Clear\n \
+		X:          Black\n \
+		C:          Red\n \
+		V:          Green\n \
+		B:          Blue\n \
+		Q:          Darken\n \
+		A:          Lighten\n \
+		W:          Fine Tune +\n \
+		S:          Fine Tune -\n')
 	}
 }
 
@@ -201,20 +287,20 @@ function onClick(e, gridOptions) {
 
 	var cell = getCellAt(x, y, gridOptions);
 
-	toggleCell(cell, gridOptions)
+	toggleCell(cell, gridOptions);
 }
 
 function blendRGBColors(p, c0, c1) {
-	c0 = c0 || '#FFFFFF'
-		c1 = c1 || '#FFFFFF'
-		if (c1 == '')
-			c1 = '#FFFFFF'
+	c0 = c0 || '#FFFFFF';
+	c1 = c1 || '#FFFFFF';
 
-				var color0 = {};
-		var color1 = {};
+	var color0 = {};
+	var color1 = {};
+	
 	color0.r = parseInt(c0[1] + c0[2], 16);
 	color0.g = parseInt(c0[3] + c0[4], 16);
 	color0.b = parseInt(c0[5] + c0[6], 16);
+	
 	color1.r = parseInt(c1[1] + c1[2], 16);
 	color1.g = parseInt(c1[3] + c1[4], 16);
 	color1.b = parseInt(c1[5] + c1[6], 16);
@@ -239,25 +325,30 @@ function blendRGBColors(p, c0, c1) {
 }
 
 function setCellColor(cell, color, gridOptions) {
-	cell.color = blendRGBColors(gridOptions.power.current, color, cell.color);
+	cell.color = color;
 	if (cell.color == '#FFFFFF')
 		cell.color = '';
 	submitData(cell.x, cell.y, gridOptions);
 	redraw(gridOptions);
 }
 
+function blendCellColor(cell, color, gridOptions) {
+	var newColor = blendRGBColors(gridOptions.power.current, color, cell.color);
+	setCellColor(cell, newColor, gridOptions);
+}
+
 function toggleCell(cell, gridOptions) {
 
 	if (cell.color == '#000000') {
-		setCellColor(cell, '#FF0000', gridOptions);
+		blendCellColor(cell, '#FF0000', gridOptions);
 	} else if (cell.color == '#FF0000') {
-		setCellColor(cell, '#00FF00', gridOptions);
+		blendCellColor(cell, '#00FF00', gridOptions);
 	} else if (cell.color == '#00FF00') {
-		setCellColor(cell, '#0000FF', gridOptions);
+		blendCellColor(cell, '#0000FF', gridOptions);
 	} else if (cell.color == '#0000FF') {
-		setCellColor(cell, '', gridOptions);
+		blendCellColor(cell, '', gridOptions);
 	} else if (cell.color == '#FFFFFF' || cell.color == undefined || cell.color == '') {
-		setCellColor(cell, '#000000', gridOptions);
+		blendCellColor(cell, '#000000', gridOptions);
 	}
 
 }
@@ -286,7 +377,7 @@ function getCellAt(x, y, gridOptions) {
 }
 
 function resizeCanvas(gridOptions) {
-	console.log('resizeCanvas')
+	//console.log('resizeCanvas')
 	var cnv = gridOptions.canvas;
 	cnv.width = window.innerWidth;
 	cnv.height = window.innerHeight;
@@ -346,20 +437,28 @@ function drawGridLines(gridOptions) {
 	return;
 }
 
+function calcGrid(gridOptions) {
+	gridOptions.width = gridOptions.canvas.width;
+	gridOptions.height = gridOptions.canvas.height;
+	gridOptions.numCellsX = Math.ceil(gridOptions.width / gridOptions.lines.separation);
+	gridOptions.numCellsY = Math.ceil(gridOptions.height / gridOptions.lines.separation);
+	gridOptions.endX = gridOptions.startX + gridOptions.numCellsX;
+	gridOptions.endY = gridOptions.startY + gridOptions.numCellsY;
+}
+
 function drawCells(gridOptions) {
 	var cnv = gridOptions.canvas;
 	var ctx = cnv.getContext('2d');
 
+	calcGrid(gridOptions);
+	
 	var sep = gridOptions.lines.separation;
-	var iWidth = cnv.width;
-	var iHeight = cnv.height;
+	var iWidth = gridOptions.width;
+	var iHeight = gridOptions.height;
 	var startX = gridOptions.startX;
 	var startY = gridOptions.startY;
-	var numCellsX = Math.floor(iWidth / sep);
-	var numCellsY = Math.floor(iHeight / sep);
-
-	gridOptions.endX = startX + numCellsX;
-	gridOptions.endY = startY + numCellsY;
+	var numCellsX = gridOptions.numCellsX;
+	var numCellsY = gridOptions.numCellsY;
 
 	//requestData({'startX':startX, 'startY':startY, 'endX':startX + numCellsX, 'endY':startY + numCellsY}, gridOptions);
 
@@ -384,7 +483,7 @@ function drawCells(gridOptions) {
 }
 
 function onMessage(e, gridOptions) {
-	console.log('recieved:\t' + e.data)
+	//console.log('recieved:\t' + e.data)
 	var toks = e.data.split('\t');
 
 	if (toks[0] == 'set') {
