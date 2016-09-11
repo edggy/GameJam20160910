@@ -18,50 +18,58 @@ class ServerWebSocket(WebSocket):
         
     def received_message(self, message):
         print 'received_message:\t' + str(message)
-        toks = str(message).split(delimeter)
-        
-        if toks[0] == 'get':
-            request = json.loads(toks[1])
-            startX = int(request['startX'])
-            startY = int(request['startY'])
-            endX = int(request['endX'])
-            endY = int(request['endY'])
+        try:
+            toks = str(message).split(delimeter)
             
-            data = {}
-            
-            for x in range(startX, endX):
-                for y in range(startY, endY):
-                    if (x, y) in world:
-                        if x not in data:
-                            data[x] = {}
-                        #if y not in data[x]:
-                        #    data[x][y] = {}
-                            
-                        data[x][y] = world[(x, y)]
-                    
-            self.send('set' + delimeter + json.dumps(data))
-            print 'sent:\t' + 'set' + delimeter + json.dumps(data)
-        
-        elif toks[0] == 'set':
-            data = json.loads(toks[1])
-            x = int(data['x'])
-            y = int(data['y'])
-            color = data['color']
-            
-            if (x,y) not in world:
-                world[(x,y)] = {}
+            if toks[0] == 'get':
+                request = json.loads(toks[1])
+                startX = int(request['startX'])
+                startY = int(request['startY'])
+                endX = int(request['endX'])
+                endY = int(request['endY'])
                 
-            world[(x,y)]['color'] = color
+                data = {}
+                
+                for x in range(startX, endX):
+                    for y in range(startY, endY):
+                        if (x, y) in world:
+                            if x not in data:
+                                data[x] = {}
+                                
+                            data[x][y] = world[(x, y)]
+                        
+                self.send('set' + delimeter + json.dumps(data))
+                print 'sent:\t' + 'set' + delimeter + json.dumps(data)
             
-            newData = {}
-            newData[x] = {}
-            newData[x][y] = {}
-            newData[x][y]['color'] = color
-            
-            for client in clients:
-                if client != self:
-                    client.send('set' + delimeter + json.dumps(newData))
-            print 'sent:\t' + 'set'
+            elif toks[0] == 'set':
+                data = json.loads(toks[1])
+                x = int(data['x'])
+                y = int(data['y'])
+                color = data['color']
+                
+                
+                if (x,y) not in world:
+                    world[(x,y)] = {}
+                    
+                
+                world[(x,y)]['color'] = color
+                
+                if world[(x,y)]['color'] == '':
+                    world[(x,y)].pop('color', None)
+                    if len(world[(x,y)]) == 0:
+                        del world[(x,y)]
+                
+                newData = {}
+                newData[x] = {}
+                newData[x][y] = {}
+                newData[x][y]['color'] = color
+                
+                for client in clients:
+                    if client != self:
+                        client.send('set' + delimeter + json.dumps(newData))
+                print 'sent:\t' + 'set'
+        except ValueError:
+            pass
         
 
 class Root:
@@ -88,8 +96,8 @@ class Root:
            var gridOptions = {
                    lines: {
                        separation: 25,
-                       color: '#BBBBBB',
-                       min: 15,
+                       color: '#D0D0D0',
+                       min: 10,
                        max: 200
                    },
                    width: cnv.width,
@@ -97,12 +105,13 @@ class Root:
                    canvas: cnv,
                    cells: {},
                    startX: 0,
-                   startY: 0
+                   startY: 0,
+                   power: {current: 1.0, max:1.0, min:0.01, delta:8.0},
                };
                
-           gridOptions.ws = new WebSocket("ws://localhost:8080/ws");
+           gridOptions.ws = new WebSocket("ws://cloudvm.mine.nu/ws");
            gridOptions.ws.onmessage = function(e){onMessage(e, gridOptions)};
-           //gridOptions.ws.onopen = function(e){console.log('Socket Opened')};
+           gridOptions.ws.onopen = function(e){requestData({'startX':gridOptions.startX-5, 'startY':gridOptions.startY-5, 'endX':gridOptions.endX + 5, 'endY':gridOptions.endY + 5}, gridOptions)};
            //gridOptions.ws.onclose = function(e){console.log('Socket Closed')};
            //gridOptions.ws.onmessage = function(e){console.log('recieved:\t' + e.data)};
            
@@ -114,33 +123,122 @@ class Root:
            window.addEventListener("keypress", function(e){onKeypress(e, gridOptions)}, false);
            window.addEventListener("keydown", function(e){onKeydown(e, gridOptions)}, false);
            window.addEventListener("click", function(e){onClick(e, gridOptions)}, false);
-           //window.addEventListener("message", function(e){onMessage(e, gridOptions)}, false);
+           //window.addEventListener("click", function(e){onClick(e, gridOptions)}, false);
+           window.addEventListener("mousemove", function(e){gridOptions.mouseX = e.clientX; gridOptions.mouseY = e.clientY;}, false);
+           window.addEventListener("mousewheel", function(e){MouseWheelHandler(e, gridOptions)}, false);
+           window.addEventListener("DOMMouseScroll", function(e){MouseWheelHandler(e, gridOptions)}, false);
+
            
-           window.setInterval(function(){requestData({'startX':gridOptions.startX-5, 'startY':gridOptions.startY-5, 'endX':gridOptions.endX + 5, 'endY':gridOptions.endY + 5}, gridOptions)}, 1000);
-           
+           window.setInterval(function(){requestData({'startX':gridOptions.startX-5, 'startY':gridOptions.startY-5, 'endX':gridOptions.endX + 5, 'endY':gridOptions.endY + 5}, gridOptions)}, 5000);
            
            
            // Draw canvas border for the first time.
            resizeCanvas(gridOptions);
         }
         
+        function zoom(amount, gridOptions) {
+            gridOptions.lines.separation += amount;
+            if(gridOptions.lines.separation > gridOptions.lines.max) gridOptions.lines.separation = gridOptions.lines.max;
+            else if(gridOptions.lines.separation < gridOptions.lines.min) gridOptions.lines.separation = gridOptions.lines.min;
+            redraw(gridOptions);
+        }
+        
+        function MouseWheelHandler(e, gridOptions) {
+
+	    // cross-browser wheel delta
+	    var e = window.event || e; // old IE support
+	    var delta = Math.max(-1, Math.min(1, (e.wheelDelta || -e.detail)));
+            zoom(delta, gridOptions)
+        }
+        
         function onKeypress(e, gridOptions) {
            console.log('onKeypress')
-           if(e.keyCode == 43 && gridOptions.lines.separation < gridOptions.lines.max) {
-              // +
-              gridOptions.lines.separation += 1;
-              redraw(gridOptions);
+           if(e.keyCode == 43 || e.keyCode == 61) {
+              // + or = 
+              zoom(1, gridOptions);
            }
-           else if(e.keyCode == 45 && gridOptions.lines.separation > gridOptions.lines.min) {
+           else if(e.keyCode == 45) {
               // -
-              gridOptions.lines.separation -= 1;
-              redraw(gridOptions);
+              zoom(-1, gridOptions);
            }
+           else if(e.keyCode == 32) {
+               // Space
+               var cell = getCellAtMouse(gridOptions);
+            
+               if(cell != gridOptions.lastCell) {
+                    gridOptions.lastCell = cell;
+                    toggleCell(cell, gridOptions);
+                }
+           }
+           else if(e.keyCode == 122) {
+               // Z
+               var cell = getCellAtMouse(gridOptions);
+            
+               if(cell != gridOptions.lastCell) {
+                    gridOptions.lastCell = cell;
+                    setCellColor(cell, '', gridOptions);
+                }
+           }
+           else if(e.keyCode == 120) {
+               // X
+               var cell = getCellAtMouse(gridOptions);
+            
+               if(cell != gridOptions.lastCell) {
+                    gridOptions.lastCell = cell;
+                    setCellColor(cell, '#000000', gridOptions);
+                }
+           }
+           else if(e.keyCode == 99) {
+               // C
+               var cell = getCellAtMouse(gridOptions);
+            
+               if(cell != gridOptions.lastCell) {
+                    gridOptions.lastCell = cell;
+                    setCellColor(cell, '#FF0000', gridOptions);
+                }
+           }
+           else if(e.keyCode == 118) {
+               // V
+               var cell = getCellAtMouse(gridOptions);
+            
+               if(cell != gridOptions.lastCell) {
+                    gridOptions.lastCell = cell;
+                    setCellColor(cell, '#00FF00', gridOptions);
+                }
+           }
+           else if(e.keyCode == 98) {
+               // B
+               var cell = getCellAtMouse(gridOptions);
+            
+               if(cell != gridOptions.lastCell) {
+                    gridOptions.lastCell = cell;
+                    setCellColor(cell, '#0000FF', gridOptions);
+                }
+           }
+           else if(e.keyCode == 113) {
+               //Q
+               gridOptions.power.current += 1.0/gridOptions.power.delta;
+               if(gridOptions.power.current > gridOptions.power.max) gridOptions.power.current = 1;
+           }
+           else if(e.keyCode == 97) {
+               //A
+               gridOptions.power.current -= 1.0/gridOptions.power.delta;
+               if(gridOptions.power.current < gridOptions.power.min) gridOptions.power.current = gridOptions.power.min;
+           }
+           else if(e.keyCode == 119) {
+               //W
+               gridOptions.power.delta /= 2;
+               if(gridOptions.power.delta < 2) gridOptions.power.delta = 2;
+            }
+            else if(e.keyCode == 115) {
+                //S
+                gridOptions.power.delta *= 2;
+                if(gridOptions.power.delta > 128) gridOptions.power.delta = 128;
+            }
            
         }
         
         function onKeydown(e, gridOptions) {
-            console.log('onKeydown')
             if(e.keyCode == 37) {
                 //Left
                 gridOptions.startX -= 1;
@@ -164,24 +262,75 @@ class Root:
         }
         
         function onClick(e, gridOptions) {
-            console.log('onClick')
             var x = e.clientX;
             var y = e.clientY;
             
-            var cell = getCellAt(x, y, gridOptions);
+            var cell = getCellAt(x, y, gridOptions);\
             
-            if(cell.color == '#FF0000') {
-                cell.color = '#FFFFFF';
-                submitData(cell.x, cell.y, gridOptions);
-                redraw(gridOptions);
+            toggleCell(cell, gridOptions)
+        }
+        
+        function blendRGBColors(p, c0, c1) {
+            c0 = c0 || '#FFFFFF'
+            c1 = c1 || '#FFFFFF'
+            if(c1 == '') c1 = '#FFFFFF'
+            
+            var color0 = {};
+            var color1 = {};
+            color0.r = parseInt(c0[1] + c0[2], 16);
+            color0.g = parseInt(c0[3] + c0[4], 16);
+            color0.b = parseInt(c0[5] + c0[6], 16);
+            color1.r = parseInt(c1[1] + c1[2], 16);
+            color1.g = parseInt(c1[3] + c1[4], 16);
+            color1.b = parseInt(c1[5] + c1[6], 16);
+            
+            var newColor = {}
+            for(var c in color0) {
+                newColor[c] = Math.ceil(color0[c] * p + color1[c] * (1-p));
+                if(newColor[c] < 0x10) newColor[c] = 0;
+                if(newColor[c] > 0xF0) newColor[c] = 0xFF;
+                var hex = newColor[c].toString(16);
+                if(hex.length < 2) {
+                    hex = '0' + hex;
+                }
+                newColor[c] = hex;
+                if(newColor[c].length > 2) newColor[c] = 'FF';
             }
-            else{
-                cell.color = '#FF0000';
-                submitData(cell.x, cell.y, gridOptions);
-                redraw(gridOptions);
+            
+            return ('#' + newColor.r + newColor.g + newColor.b).toUpperCase();
+        }
+        
+        function setCellColor(cell, color, gridOptions) {
+            cell.color = blendRGBColors(gridOptions.power.current, color, cell.color);
+            if(cell.color == '#FFFFFF') cell.color = '';
+            submitData(cell.x, cell.y, gridOptions);
+            redraw(gridOptions);
+        }
+        
+        function toggleCell(cell, gridOptions) {
+            
+            if(cell.color == '#000000') {
+                setCellColor(cell, '#FF0000', gridOptions);
+            }
+            else if(cell.color == '#FF0000') {
+                setCellColor(cell, '#00FF00', gridOptions);
+            }
+            else if(cell.color == '#00FF00') {
+                setCellColor(cell, '#0000FF', gridOptions);
+            }
+            else if(cell.color == '#0000FF') {
+                setCellColor(cell, '', gridOptions);
+            }
+            else if(cell.color == '#FFFFFF' || cell.color == undefined || cell.color == '') {
+                setCellColor(cell, '#000000', gridOptions);
             }
             
-            
+        }
+        
+        
+        
+        function getCellAtMouse(gridOptions) {
+            return getCellAt(gridOptions.mouseX, gridOptions.mouseY, gridOptions) 
         }
         
         function getCellAt(x, y, gridOptions) {
@@ -282,14 +431,15 @@ class Root:
             
             //requestData({'startX':startX, 'startY':startY, 'endX':startX + numCellsX, 'endY':startY + numCellsY}, gridOptions);
             
-            for(var x = 0; x < numCellsX; x++) {
-                for(var y = 0; y < numCellsX; y++) {
+            for(var x = 0; x <= numCellsX; x++) {
+                for(var y = 0; y <= numCellsX; y++) {
                     if(gridOptions.cells[x+startX] == undefined) continue;
                     if(gridOptions.cells[x+startX][y+startY] == undefined) continue;
                     
                     var cell = gridOptions.cells[x+startX][y+startY];
                     
-                    if(cell.color != undefined) ctx.fillStyle = cell.color;
+                    if(cell.color == undefined || cell.color == '') ctx.fillStyle = '#FFFFFF'; 
+                    else ctx.fillStyle = cell.color;
                     
                     ctx.fillRect(x*sep,y*sep,sep,sep);
                 }
@@ -318,7 +468,7 @@ class Root:
         function requestData(range, gridOptions) {
             var ws = gridOptions.ws;
             
-            if(ws.readyState) {
+            if(ws.readyState == 1) {
                 ws.send('get\t' + JSON.stringify(range))
             }
             
@@ -331,7 +481,7 @@ class Root:
             data.x = x;
             data.y = y;
             
-            if(ws.readyState) {
+            if(ws.readyState == 1) {
                 ws.send('set\t' + JSON.stringify(data))
             }
         }
@@ -346,12 +496,19 @@ class Root:
     def ws(self):
         # you can access the class instance through
         handler = cherrypy.request.ws_handler    
+        
+    @cherrypy.expose
+    def reset(self):
+        world.clear()
+        return self.index()
 
 if __name__ == '__main__':
 
     current_dir = path.dirname(path.abspath(__file__))
     
-    cherrypy.config.update({'server.socket_port': 8080})
+    cherrypy.config.update({'server.socket_port': 80})
+    cherrypy.config.update({'server.socket_host': '0.0.0.0'})
+    
     WebSocketPlugin(cherrypy.engine).subscribe()
     cherrypy.tools.websocket = WebSocketTool()    
 
